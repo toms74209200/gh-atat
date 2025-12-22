@@ -1,0 +1,27 @@
+name: Job - Test (large size)
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    name: Run Large Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: tests/acceptance
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.4'
+          cache: true
+
+      - name: Tidy dependencies
+        run: go mod tidy
+
+      - name: Run large tests
+        run: go test -tags=large ./...

@@ -1,0 +1,44 @@
+name:  Job - Test (small size)
+
+on:
+  workflow_call:
+    inputs:
+      with-coverage:
+        required: false
+        type: boolean
+        default: false
+        description: 'Whether to generate coverage report'
+
+jobs:
+  test:
+    name: Run Small Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.4'
+          cache: true
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run small tests
+        if: ${{ !inputs.with-coverage }}
+        run: go test -tags=small ./...
+
+      - name: Run small tests with coverage
+        if: ${{ inputs.with-coverage }}
+        run: |
+          COVERAGE=$(cat scripts/coverage.txt)
+          go test -tags=small -race -coverprofile=coverage.txt -covermode=atomic $COVERAGE
+
+      - name: Upload coverage report
+        if: ${{ inputs.with-coverage }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.txt
