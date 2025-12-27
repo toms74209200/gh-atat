@@ -55,9 +55,13 @@ func (s *LocalConfigStorage) LoadConfig() (map[config.ConfigKey]any, error) {
 // SaveConfig saves configuration to the local config file
 func (s *LocalConfigStorage) SaveConfig(configData map[config.ConfigKey]any) error {
 	// Create config directory if it doesn't exist
-	if _, err := os.Stat(s.configDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(s.configDir, 0755); err != nil {
-			return fmt.Errorf("failed to create project config directory at %s: %w", s.configDir, err)
+	if _, err := os.Stat(s.configDir); err != nil {
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(s.configDir, 0755); err != nil {
+				return fmt.Errorf("failed to create project config directory at %s: %w", s.configDir, err)
+			}
+		} else {
+			return fmt.Errorf("failed to access project config directory at %s: %w", s.configDir, err)
 		}
 	}
 
