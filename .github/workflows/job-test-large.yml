@@ -6,9 +6,11 @@ on:
 jobs:
   test:
     name: Run Large Tests
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
     defaults:
       run:
         working-directory: tests/acceptance
@@ -25,4 +27,7 @@ jobs:
         run: go mod tidy
 
       - name: Run large tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATAT_TEST_REPO: ${{ vars.ATAT_TEST_REPO }}
         run: go test -tags=large ./...
