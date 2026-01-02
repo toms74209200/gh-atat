@@ -65,6 +65,9 @@ func runPush() error {
 	// Read TODO.md
 	todoContent, err := os.ReadFile("TODO.md")
 	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("TODO.md file not found")
+		}
 		return fmt.Errorf("failed to read TODO.md: %w", err)
 	}
 
@@ -144,6 +147,9 @@ func runPull() error {
 	// Read TODO.md
 	todoContent, err := os.ReadFile("TODO.md")
 	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("TODO.md file not found")
+		}
 		return fmt.Errorf("failed to read TODO.md: %w", err)
 	}
 
