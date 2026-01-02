@@ -2,18 +2,34 @@ name: Job - Test (large size)
 
 on:
   workflow_call:
+    secrets:
+      CLIENT_ID:
+        required: true
+      PRIVATE_KEY:
+        required: true
 
 jobs:
   test:
     name: Run Large Tests
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
     defaults:
       run:
         working-directory: tests/acceptance
     steps:
       - uses: actions/checkout@v4
+
+      - name: Generate token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLIENT_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+          owner: toms74209200
+          repositories: atat-test
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -24,5 +40,12 @@ jobs:
       - name: Tidy dependencies
         run: go mod tidy
 
+      - name: Build binary
+        working-directory: .
+        run: go build -o gh-atat
+
       - name: Run large tests
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          ATAT_TEST_REPO: ${{ vars.ATAT_TEST_REPO }}
         run: go test -tags=large ./...

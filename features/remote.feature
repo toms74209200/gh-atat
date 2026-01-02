@@ -1,4 +1,3 @@
-@pending
 Feature: List remote repositories
 
   Scenario: List a single remote repository

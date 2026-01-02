@@ -25,6 +25,9 @@ jobs:
     name: Large Test
     needs: [medium-test]
     uses: ./.github/workflows/job-test-large.yml
+    secrets:
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
 
   lint:
     name: Lint and Format

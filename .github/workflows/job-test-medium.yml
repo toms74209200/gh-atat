@@ -6,12 +6,8 @@ on:
 jobs:
   test:
     name: Run Medium Tests
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: tests/acceptance
     steps:
       - uses: actions/checkout@v4
 

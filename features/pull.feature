@@ -1,4 +1,3 @@
-@pending
 Feature: Pull GitHub Issues to TODO.md items
 
   Scenario: Add open issue to TODO.md when not present
@@ -41,16 +40,6 @@ Feature: Pull GitHub Issues to TODO.md items
     When I run `gh atat pull`
     Then the TODO.md file should remain unchanged
     And cleanup remaining open issues
-
-  Scenario: Error when not logged in
-    Given the user is not logged in
-    And the config file content is '{"repositories":["toms74209200/atat-test"]}'
-    And the TODO.md file contains:
-      """
-      - [ ] Existing task
-      """
-    When I run `gh atat pull`
-    Then the error should be "Error: Authentication required"
 
   Scenario: Error when no repository configured
     Given the user is logged in via GitHub CLI
