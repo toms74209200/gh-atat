@@ -233,7 +233,7 @@ func runRemoteAdd(repo string) error {
 		return fmt.Errorf("failed to check repository %s: %w", repo, err)
 	}
 	if !exists {
-		return fmt.Errorf("Repository %s not found or not accessible.", repo)
+		return fmt.Errorf("repository %s not found or not accessible", repo)
 	}
 
 	// Add repository
@@ -293,17 +293,17 @@ func runRemoteRemove(repo string) error {
 func getFirstRepository(configMap map[config.ConfigKey]any) (string, error) {
 	reposValue, ok := configMap[config.Repositories]
 	if !ok {
-		return "", fmt.Errorf("No repository configured")
+		return "", fmt.Errorf("no repository configured")
 	}
 
 	reposArray, ok := reposValue.([]interface{})
 	if !ok || len(reposArray) == 0 {
-		return "", fmt.Errorf("No repository configured")
+		return "", fmt.Errorf("no repository configured")
 	}
 
 	repo, ok := reposArray[0].(string)
 	if !ok {
-		return "", fmt.Errorf("Invalid repository configuration")
+		return "", fmt.Errorf("invalid repository configuration")
 	}
 
 	return repo, nil
