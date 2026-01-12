@@ -32,7 +32,7 @@ Feature: Push TODO.md items to GitHub Issues
       - [ ] New task
       """
     When I run `gh atat push`
-    Then the error should be "Error: No repository configured"
+    Then the error should be "Error: no repository configured"
 
   Scenario: Error when TODO.md file does not exist
     Given the user is logged in via GitHub CLI

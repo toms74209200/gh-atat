@@ -34,7 +34,7 @@ Feature: List remote repositories
     Given the user is logged in via GitHub CLI
     And an empty config file
     When I run `gh atat remote add non-existent-owner/non-existent-repo`
-    Then the error should be "Error: Repository non-existent-owner/non-existent-repo not found or not accessible."
+    Then the error should be "Error: repository non-existent-owner/non-existent-repo not found or not accessible"
     And the config file should be empty
 
   Scenario: Remove a repository successfully
