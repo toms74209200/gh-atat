@@ -50,8 +50,9 @@ Check both `/TODO.md` and `git log --oneline` to verify:
 
 ### Module Implementation Process
 1. Create a feature branch: `git switch -c <branch-name>`
-2. Implement the module 
+2. Implement the module
 3. Port ALL test cases from reference implementation
-4. Ensure all tests pass: `go test -v ./internal/<module>/`
-5. Create PR and verify through GitHub Actions
-6. After merge, proceed to next module
+4. **Add module to coverage tracking**: When adding small tests, add the module path to `/workspaces/gh-atat/scripts/coverage.txt` (e.g., `./internal/<module>/...`)
+5. Ensure all tests pass: `go test -v ./internal/<module>/`
+6. Create PR and verify through GitHub Actions
+7. After merge, proceed to next module
