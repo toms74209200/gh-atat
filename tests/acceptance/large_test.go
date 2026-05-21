@@ -17,6 +17,7 @@ func TestLargeFeatures(t *testing.T) {
 			Paths: []string{
 				"../../features/push.feature",
 				"../../features/pull.feature",
+				"../../features/clean.feature",
 				"../../features/remote.feature",
 			},
 			TestingT: t,
