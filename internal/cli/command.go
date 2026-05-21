@@ -50,6 +50,13 @@ type RemoteRemove struct {
 
 func (RemoteRemove) command() {}
 
+// Clean command
+type Clean struct {
+	DryRun bool
+}
+
+func (Clean) command() {}
+
 // Help command
 type Help struct{}
 
@@ -86,6 +93,8 @@ func ParseArgs(args []string) Command {
 			return Push{}
 		case "pull":
 			return Pull{}
+		case "clean":
+			return Clean{DryRun: false}
 		case "remote":
 			return RemoteList{}
 		case "help":
@@ -94,6 +103,9 @@ func ParseArgs(args []string) Command {
 			return Unknown{Message: args[1]}
 		}
 	case 3:
+		if args[1] == "clean" && args[2] == "--dry-run" {
+			return Clean{DryRun: true}
+		}
 		if args[1] == "remote" {
 			subCmd := args[2]
 			if slices.Contains(validRemoteSubcommands, subCmd) {

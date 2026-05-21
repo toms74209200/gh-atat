@@ -303,6 +303,30 @@ func TestParsePullCommand(t *testing.T) {
 	}
 }
 
+func TestParseCleanCommand(t *testing.T) {
+	args := []string{"program", "clean"}
+	result := ParseArgs(args)
+	cmd, ok := result.(Clean)
+	if !ok {
+		t.Fatalf("Expected Clean, got %T", result)
+	}
+	if cmd.DryRun {
+		t.Error("Expected DryRun to be false")
+	}
+}
+
+func TestParseCleanDryRunCommand(t *testing.T) {
+	args := []string{"program", "clean", "--dry-run"}
+	result := ParseArgs(args)
+	cmd, ok := result.(Clean)
+	if !ok {
+		t.Fatalf("Expected Clean, got %T", result)
+	}
+	if !cmd.DryRun {
+		t.Error("Expected DryRun to be true")
+	}
+}
+
 func TestParseNonRemoteCommandWithFourOrMoreArgs(t *testing.T) {
 	args := []string{"program", "push", "arg1", "arg2"}
 	result := ParseArgs(args)
