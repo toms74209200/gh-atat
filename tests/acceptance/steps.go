@@ -23,6 +23,7 @@ type testContext struct {
 	capturedOutput     string
 	createdIssues      []int
 	issueNumberMapping map[int]int
+	originalTodo       string
 	ctx                context.Context
 	cancel             context.CancelFunc
 }
@@ -89,6 +90,7 @@ func (tc *testContext) emptyConfigFile() error {
 
 // Step: the TODO.md file contains:
 func (tc *testContext) todoFileContains(content *godog.DocString) error {
+	tc.originalTodo = content.Content
 	return os.WriteFile(tc.todoPath, []byte(content.Content), 0644)
 }
 
@@ -111,8 +113,57 @@ func (tc *testContext) githubIssueWithTitle(number int, title string) error {
 	tc.createdIssues = append(tc.createdIssues, issueNum)
 	tc.issueNumberMapping[number] = issueNum
 
-	// Wait for GitHub API eventual consistency (matching reference implementation)
-	time.Sleep(5 * time.Second)
+	// Poll individual issue endpoint until available
+	delay := 100
+	for range 5 {
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+		if delay*2 < 2000 {
+			delay *= 2
+		} else {
+			delay = 2000
+		}
+		issue, err := getGitHubIssue(issueNum)
+		if err == nil && issue.Number == issueNum {
+			break
+		}
+	}
+
+	// Poll issue list endpoint until the created issue appears
+	repo := os.Getenv("ATAT_TEST_REPO")
+	if repo == "" {
+		repo = "toms74209200/atat-test"
+	}
+	delay = 500
+	for range 8 {
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+		if delay*2 < 5000 {
+			delay *= 2
+		} else {
+			delay = 5000
+		}
+		cmd := exec.Command("gh", "api",
+			fmt.Sprintf("repos/%s/issues?state=all&per_page=100", repo))
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		var issues []struct {
+			Number int `json:"number"`
+		}
+		if err := json.Unmarshal(output, &issues); err != nil {
+			continue
+		}
+		found := false
+		for _, issue := range issues {
+			if issue.Number == issueNum {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
 
 	return nil
 }
@@ -137,6 +188,7 @@ func (tc *testContext) updateTodoWithActualIssueNumber() error {
 		todoContent = strings.ReplaceAll(todoContent, placeholder, replacement)
 	}
 
+	tc.originalTodo = todoContent
 	return os.WriteFile(tc.todoPath, []byte(todoContent), 0644)
 }
 
@@ -170,7 +222,7 @@ func (tc *testContext) runCommand(command string) error {
 	}
 
 	// Wait for created issues to be available via GitHub API (eventual consistency)
-	if len(tc.createdIssues) > 0 && (len(parts) > 2 && (parts[2] == "push" || parts[2] == "pull")) {
+	if len(tc.createdIssues) > 0 && (len(parts) > 2 && (parts[2] == "push" || parts[2] == "pull" || parts[2] == "clean")) {
 		if err := tc.waitForIssuesAvailable(); err != nil {
 			return err
 		}
@@ -344,12 +396,40 @@ func (tc *testContext) todoShouldContain(content string) error {
 	return nil
 }
 
+// Step: the TODO.md file should not contain "{content}"
+func (tc *testContext) todoShouldNotContain(content string) error {
+	todoContent, err := os.ReadFile(tc.todoPath)
+	if err != nil {
+		return err
+	}
+
+	// Replace placeholder issue numbers with actual ones in expected content
+	expectedContent := content
+	for requested, actual := range tc.issueNumberMapping {
+		placeholder := fmt.Sprintf("#%d", requested)
+		replacement := fmt.Sprintf("#%d", actual)
+		expectedContent = strings.ReplaceAll(expectedContent, placeholder, replacement)
+	}
+
+	if strings.Contains(string(todoContent), expectedContent) {
+		return fmt.Errorf("expected TODO.md to NOT contain '%s', but it does: %s", expectedContent, string(todoContent))
+	}
+
+	return nil
+}
+
 // Step: the TODO.md file should remain unchanged
 func (tc *testContext) todoShouldRemainUnchanged() error {
-	// This would require storing the original content
-	// For now, we'll just verify the file exists
-	_, err := os.ReadFile(tc.todoPath)
-	return err
+	content, err := os.ReadFile(tc.todoPath)
+	if err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(string(content)) != strings.TrimSpace(tc.originalTodo) {
+		return fmt.Errorf("expected TODO.md to remain unchanged.\nOriginal: %s\nActual: %s", tc.originalTodo, string(content))
+	}
+
+	return nil
 }
 
 // Step: the output should be "{output}"
@@ -495,6 +575,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the TODO\.md file does not exist$`, testCtx.todoFileDoesNotExist)
 	ctx.Step(`^the TODO\.md file should be updated with the issue number$`, testCtx.todoUpdatedWithIssueNumber)
 	ctx.Step(`^the TODO\.md file should contain "([^"]*)"$`, testCtx.todoShouldContain)
+	ctx.Step(`^the TODO\.md file should not contain "([^"]*)"$`, testCtx.todoShouldNotContain)
 	ctx.Step(`^the TODO\.md file should remain unchanged$`, testCtx.todoShouldRemainUnchanged)
 
 	// GitHub issue steps
