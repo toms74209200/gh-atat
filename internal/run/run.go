@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/toms74209200/gh-atat/internal/clean"
 	"github.com/toms74209200/gh-atat/internal/cli"
 	"github.com/toms74209200/gh-atat/internal/config"
 	"github.com/toms74209200/gh-atat/internal/github"
@@ -24,6 +25,8 @@ func Run(args []string) error {
 		return runPush()
 	case cli.Pull:
 		return runPull()
+	case cli.Clean:
+		return runClean(cmd.DryRun)
 	case cli.RemoteList:
 		return runRemoteList()
 	case cli.RemoteAdd:
@@ -169,6 +172,88 @@ func runPull() error {
 
 	// Write updated TODO.md
 	updatedContent := markdown.SerializeTodoMarkdown(updatedTodoItems)
+	if err := os.WriteFile("TODO.md", []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write TODO.md: %w", err)
+	}
+
+	return nil
+}
+
+func runClean(dryRun bool) error {
+	// Load configuration
+	configStorage, err := storage.NewLocalConfigStorage()
+	if err != nil {
+		return fmt.Errorf("failed to read project configuration: %w", err)
+	}
+
+	configMap, err := configStorage.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("error loading project config: %w", err)
+	}
+
+	// Get repository
+	repo, err := getFirstRepository(configMap)
+	if err != nil {
+		return err
+	}
+
+	// Read TODO.md
+	todoContent, err := os.ReadFile("TODO.md")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("TODO.md file not found")
+		}
+		return fmt.Errorf("failed to read TODO.md: %w", err)
+	}
+
+	todoItems, err := markdown.ParseTodoMarkdown(string(todoContent))
+	if err != nil {
+		return err
+	}
+
+	// Build clean candidates from checked items with issue numbers
+	var candidates []clean.CleanCandidate
+	for _, item := range todoItems {
+		if candidate, ok := clean.NewCleanCandidate(item); ok {
+			candidates = append(candidates, candidate)
+		}
+	}
+
+	// Fetch GitHub issues
+	githubIssues, err := fetchGitHubIssues(repo)
+	if err != nil {
+		return err
+	}
+
+	// Find removable items
+	removable := clean.FindRemovableItems(candidates, githubIssues)
+
+	if len(removable) == 0 {
+		return nil
+	}
+
+	// Build a set of removable issue numbers for quick lookup
+	removableSet := make(map[uint64]bool)
+	for _, r := range removable {
+		removableSet[r.IssueNumber] = true
+		fmt.Printf("Removing: %s (#%d)\n", r.Text, r.IssueNumber)
+	}
+
+	if dryRun {
+		return nil
+	}
+
+	// Filter out removable items from the todo list
+	var remaining []todo.TodoItem
+	for _, item := range todoItems {
+		if item.IssueNumber != nil && removableSet[*item.IssueNumber] {
+			continue
+		}
+		remaining = append(remaining, item)
+	}
+
+	// Write updated TODO.md
+	updatedContent := markdown.SerializeTodoMarkdown(remaining)
 	if err := os.WriteFile("TODO.md", []byte(updatedContent), 0644); err != nil {
 		return fmt.Errorf("failed to write TODO.md: %w", err)
 	}
@@ -408,6 +493,7 @@ Usage:
 Commands:
   push          Push TODO items to GitHub Issues
   pull          Pull GitHub Issues to TODO items
+  clean         Remove completed TODO items with closed issues
   remote        List configured repositories
   remote add    Add a repository
   remote remove Remove a repository
@@ -416,6 +502,8 @@ Commands:
 Examples:
   gh atat push
   gh atat pull
+  gh atat clean
+  gh atat clean --dry-run
   gh atat remote
   gh atat remote add owner/repo
   gh atat remote remove owner/repo
