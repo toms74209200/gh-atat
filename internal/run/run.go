@@ -85,14 +85,29 @@ func runPush() error {
 		return err
 	}
 
-	// Calculate operations
+	// Calculate title updates with rename history
+	titleUpdates, err := github.CalculateTitleUpdatesWithHistory(todoItems, githubIssues, func(issueNumber uint64) ([]json.RawMessage, error) {
+		return fetchIssueEvents(repo, issueNumber)
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, issueNumber := range titleUpdates.StaleIssues {
+		fmt.Printf("Warning: issue #%d was renamed on GitHub; run `gh atat pull` to update TODO.md\n", issueNumber)
+	}
+
+	// Calculate create/close operations
 	operations := github.CalculateGitHubOperations(todoItems, githubIssues)
+
+	// Combine title rename operations with create/close operations
+	allOperations := append(titleUpdates.Operations, operations...)
 
 	// Execute operations
 	updatedTodoItems := make([]todo.TodoItem, len(todoItems))
 	copy(updatedTodoItems, todoItems)
 
-	for _, todoOp := range operations {
+	for _, todoOp := range allOperations {
 		switch op := todoOp.Operation.(type) {
 		case github.CreateIssueOp:
 			issueNumber, err := createGitHubIssue(repo, op.Title)
@@ -117,6 +132,12 @@ func runPush() error {
 				return err
 			}
 			fmt.Printf("Closed issue #%d\n", op.Number)
+		case github.RenameIssueOp:
+			err := renameGitHubIssue(repo, int(op.Number), op.Title)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Renamed issue #%d: %s\n", op.Number, op.Title)
 		}
 	}
 
@@ -467,6 +488,17 @@ func fetchIssueEvents(repo string, issueNumber uint64) ([]json.RawMessage, error
 		return nil, err
 	}
 	return events, nil
+}
+
+func renameGitHubIssue(repo string, number int, title string) error {
+	body := map[string]string{"title": title}
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	_, err = ghAPIPatch(fmt.Sprintf("repos/%s/issues/%d", repo, number), string(bodyJSON))
+	return err
 }
 
 func checkRepoExists(repo string) (bool, error) {
