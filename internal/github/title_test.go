@@ -187,6 +187,38 @@ func TestCollectPastTitlesFetchesOnlyMismatchedIssues(t *testing.T) {
 	}
 }
 
+func TestFindTitleMismatchesSkipsNonexistentIssue(t *testing.T) {
+	issueNum999 := uint64(999)
+	todoItems := []todo.TodoItem{
+		{Text: "Some task", IsChecked: false, IssueNumber: &issueNum999},
+	}
+	githubIssues := []GitHubIssue{
+		{Number: 123, Title: "Different issue", State: IssueStateOpen},
+	}
+
+	mismatches := FindTitleMismatches(todoItems, githubIssues)
+
+	if len(mismatches) != 0 {
+		t.Errorf("expected 0 mismatches, got %d", len(mismatches))
+	}
+}
+
+func TestParsePastTitlesIgnoresInvalidJSON(t *testing.T) {
+	eventsJSON := []json.RawMessage{
+		json.RawMessage(`invalid json`),
+		json.RawMessage(`{"event": "renamed", "rename": {"from": "Valid title", "to": "New title"}}`),
+	}
+
+	pastTitles := ParsePastTitles(eventsJSON)
+
+	if len(pastTitles) != 1 {
+		t.Fatalf("expected 1 past title, got %d", len(pastTitles))
+	}
+	if pastTitles[0] != "Valid title" {
+		t.Errorf("expected 'Valid title', got '%s'", pastTitles[0])
+	}
+}
+
 func TestCollectPastTitlesPropagatesFetcherError(t *testing.T) {
 	issueNum123 := uint64(123)
 	todoItems := []todo.TodoItem{
