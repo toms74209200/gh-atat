@@ -167,8 +167,20 @@ func runPull() error {
 		return err
 	}
 
+	// Synchronize titles with rename history
+	titleSync, err := github.SynchronizeTitlesWithHistory(todoItems, githubIssues, func(issueNumber uint64) ([]json.RawMessage, error) {
+		return fetchIssueEvents(repo, issueNumber)
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, issueNumber := range titleSync.LocallyEditedIssues {
+		fmt.Printf("Warning: TODO.md text for issue #%d was changed locally; run `gh atat push` to update the issue title\n", issueNumber)
+	}
+
 	// Synchronize with GitHub issues
-	updatedTodoItems := github.SynchronizeWithGitHubIssues(todoItems, githubIssues)
+	updatedTodoItems := github.SynchronizeWithGitHubIssues(titleSync.Items, githubIssues)
 
 	// Write updated TODO.md
 	updatedContent := markdown.SerializeTodoMarkdown(updatedTodoItems)
@@ -441,6 +453,20 @@ func closeGitHubIssue(repo string, number int) error {
 
 	_, err = ghAPIPatch(fmt.Sprintf("repos/%s/issues/%d", repo, number), string(bodyJSON))
 	return err
+}
+
+func fetchIssueEvents(repo string, issueNumber uint64) ([]json.RawMessage, error) {
+	endpoint := fmt.Sprintf("repos/%s/issues/%d/events", repo, issueNumber)
+	data, err := ghAPI(endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	var events []json.RawMessage
+	if err := json.Unmarshal(data, &events); err != nil {
+		return nil, err
+	}
+	return events, nil
 }
 
 func checkRepoExists(repo string) (bool, error) {
