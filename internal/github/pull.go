@@ -152,6 +152,72 @@ func SynchronizeWithGitHubIssues(todoItems []todo.TodoItem, githubIssues []GitHu
 	return updatedItems
 }
 
+// TitleSynchronization holds the result of title sync during pull.
+// Items contains the updated todo items, and LocallyEditedIssues contains
+// issue numbers where the local text was changed (not matching any past title).
+type TitleSynchronization struct {
+	Items                []todo.TodoItem
+	LocallyEditedIssues []uint64
+}
+
+// SynchronizeTitles resolves title mismatches between todo items and GitHub issues
+// using the rename history. If local text matches a past title, the text is updated
+// to the current GitHub title. Otherwise, the item is kept as-is and the issue number
+// is added to the locally edited list.
+func SynchronizeTitles(todoItems []todo.TodoItem, githubIssues []GitHubIssue, pastTitles map[uint64][]string) TitleSynchronization {
+	githubIssuesMap := make(map[uint64]GitHubIssue)
+	for _, issue := range githubIssues {
+		githubIssuesMap[issue.Number] = issue
+	}
+
+	var localEdits []uint64
+	updatedItems := make([]todo.TodoItem, 0, len(todoItems))
+
+	for _, todoItem := range todoItems {
+		var renamedIssue *GitHubIssue
+
+		if todoItem.IssueNumber != nil {
+			if ghIssue, exists := githubIssuesMap[*todoItem.IssueNumber]; exists {
+				if ghIssue.State == IssueStateOpen && trimString(todoItem.Text) != trimString(ghIssue.Title) {
+					renamedIssue = &ghIssue
+				}
+			}
+		}
+
+		if renamedIssue == nil {
+			updatedItems = append(updatedItems, todoItem)
+			continue
+		}
+
+		if MatchesPastTitle(pastTitles, renamedIssue.Number, todoItem.Text) {
+			updatedItems = append(updatedItems, todo.TodoItem{
+				Text:        renamedIssue.Title,
+				IsChecked:   todoItem.IsChecked,
+				IssueNumber: todoItem.IssueNumber,
+			})
+		} else {
+			localEdits = append(localEdits, renamedIssue.Number)
+			updatedItems = append(updatedItems, todoItem)
+		}
+	}
+
+	return TitleSynchronization{
+		Items:                updatedItems,
+		LocallyEditedIssues: localEdits,
+	}
+}
+
+// SynchronizeTitlesWithHistory fetches rename history for mismatched issues
+// and resolves title conflicts.
+func SynchronizeTitlesWithHistory(todoItems []todo.TodoItem, githubIssues []GitHubIssue, eventsFetcher EventsFetcher) (TitleSynchronization, error) {
+	pastTitles, err := CollectPastTitles(todoItems, githubIssues, eventsFetcher)
+	if err != nil {
+		return TitleSynchronization{}, err
+	}
+
+	return SynchronizeTitles(todoItems, githubIssues, pastTitles), nil
+}
+
 // trimString removes leading and trailing whitespace
 func trimString(s string) string {
 	start := 0

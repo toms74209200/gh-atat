@@ -716,6 +716,235 @@ func TestSynchronizeWithGitHubIssuesComplexScenario(t *testing.T) {
 	}
 }
 
+func TestSynchronizeTitlesUpdatesTextWhenRemoteRenamed(t *testing.T) {
+	issueNum123 := uint64(123)
+	todoItems := []todo.TodoItem{
+		{Text: "Old title", IsChecked: false, IssueNumber: &issueNum123},
+	}
+	githubIssues := []GitHubIssue{
+		{Number: 123, Title: "New title", State: IssueStateOpen},
+	}
+	pastTitles := map[uint64][]string{
+		123: {"Old title"},
+	}
+
+	result := SynchronizeTitles(todoItems, githubIssues, pastTitles)
+
+	if len(result.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(result.Items))
+	}
+	if result.Items[0].Text != "New title" {
+		t.Errorf("expected 'New title', got '%s'", result.Items[0].Text)
+	}
+	if result.Items[0].IssueNumber == nil || *result.Items[0].IssueNumber != 123 {
+		t.Errorf("expected issue number 123, got %v", result.Items[0].IssueNumber)
+	}
+	if len(result.LocallyEditedIssues) != 0 {
+		t.Errorf("expected no locally edited issues, got %v", result.LocallyEditedIssues)
+	}
+}
+
+func TestSynchronizeTitlesKeepsLocalEditAndReportsIt(t *testing.T) {
+	issueNum123 := uint64(123)
+	todoItems := []todo.TodoItem{
+		{Text: "Locally edited title", IsChecked: false, IssueNumber: &issueNum123},
+	}
+	githubIssues := []GitHubIssue{
+		{Number: 123, Title: "Original title", State: IssueStateOpen},
+	}
+	pastTitles := map[uint64][]string{
+		123: {},
+	}
+
+	result := SynchronizeTitles(todoItems, githubIssues, pastTitles)
+
+	if len(result.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(result.Items))
+	}
+	if result.Items[0].Text != "Locally edited title" {
+		t.Errorf("expected 'Locally edited title', got '%s'", result.Items[0].Text)
+	}
+	if len(result.LocallyEditedIssues) != 1 {
+		t.Fatalf("expected 1 locally edited issue, got %d", len(result.LocallyEditedIssues))
+	}
+	if result.LocallyEditedIssues[0] != 123 {
+		t.Errorf("expected issue 123, got %d", result.LocallyEditedIssues[0])
+	}
+}
+
+func TestSynchronizeTitlesIgnoresClosedIssues(t *testing.T) {
+	issueNum123 := uint64(123)
+	todoItems := []todo.TodoItem{
+		{Text: "Old title", IsChecked: true, IssueNumber: &issueNum123},
+	}
+	githubIssues := []GitHubIssue{
+		{Number: 123, Title: "New title", State: IssueStateClosed},
+	}
+	pastTitles := map[uint64][]string{
+		123: {"Old title"},
+	}
+
+	result := SynchronizeTitles(todoItems, githubIssues, pastTitles)
+
+	if result.Items[0].Text != "Old title" {
+		t.Errorf("expected 'Old title', got '%s'", result.Items[0].Text)
+	}
+	if len(result.LocallyEditedIssues) != 0 {
+		t.Errorf("expected no locally edited issues, got %v", result.LocallyEditedIssues)
+	}
+}
+
+func TestSynchronizeTitlesKeepsItemsInSyncUntouched(t *testing.T) {
+	issueNum123 := uint64(123)
+	todoItems := []todo.TodoItem{
+		{Text: "Same title", IsChecked: false, IssueNumber: &issueNum123},
+		{Text: "Local task", IsChecked: false, IssueNumber: nil},
+	}
+	githubIssues := []GitHubIssue{
+		{Number: 123, Title: "Same title", State: IssueStateOpen},
+	}
+	pastTitles := map[uint64][]string{}
+
+	result := SynchronizeTitles(todoItems, githubIssues, pastTitles)
+
+	if result.Items[0].Text != "Same title" {
+		t.Errorf("expected 'Same title', got '%s'", result.Items[0].Text)
+	}
+	if result.Items[1].Text != "Local task" {
+		t.Errorf("expected 'Local task', got '%s'", result.Items[1].Text)
+	}
+	if len(result.LocallyEditedIssues) != 0 {
+		t.Errorf("expected no locally edited issues, got %v", result.LocallyEditedIssues)
+	}
+}
+
+func TestSynchronizeTitlesMatchesPastTitleWithTrim(t *testing.T) {
+	issueNum123 := uint64(123)
+	todoItems := []todo.TodoItem{
+		{Text: "  Old title  ", IsChecked: false, IssueNumber: &issueNum123},
+	}
+	githubIssues := []GitHubIssue{
+		{Number: 123, Title: "New title", State: IssueStateOpen},
+	}
+	pastTitles := map[uint64][]string{
+		123: {"Old title"},
+	}
+
+	result := SynchronizeTitles(todoItems, githubIssues, pastTitles)
+
+	if result.Items[0].Text != "New title" {
+		t.Errorf("expected 'New title', got '%s'", result.Items[0].Text)
+	}
+}
+
+func TestSynchronizeTitlesWithHistoryUpdatesRenamedAndReportsLocalEdits(t *testing.T) {
+	issueNum123 := uint64(123)
+	issueNum456 := uint64(456)
+	issueNum789 := uint64(789)
+	todoItems := []todo.TodoItem{
+		{Text: "Old title", IsChecked: false, IssueNumber: &issueNum123},
+		{Text: "Locally edited title", IsChecked: false, IssueNumber: &issueNum456},
+		{Text: "Same title", IsChecked: false, IssueNumber: &issueNum789},
+	}
+	githubIssues := []GitHubIssue{
+		{Number: 123, Title: "New title", State: IssueStateOpen},
+		{Number: 456, Title: "Original title", State: IssueStateOpen},
+		{Number: 789, Title: "Same title", State: IssueStateOpen},
+	}
+	eventsFetcher := func(issueNumber uint64) ([]json.RawMessage, error) {
+		switch issueNumber {
+		case 123:
+			return []json.RawMessage{
+				json.RawMessage(`{"event": "renamed", "rename": {"from": "Old title", "to": "New title"}}`),
+			}, nil
+		case 456:
+			return []json.RawMessage{}, nil
+		default:
+			return nil, fmt.Errorf("history should not be fetched for issue #%d", issueNumber)
+		}
+	}
+
+	result, err := SynchronizeTitlesWithHistory(todoItems, githubIssues, eventsFetcher)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(result.Items))
+	}
+	if result.Items[0].Text != "New title" {
+		t.Errorf("expected 'New title', got '%s'", result.Items[0].Text)
+	}
+	if result.Items[0].IssueNumber == nil || *result.Items[0].IssueNumber != 123 {
+		t.Errorf("expected issue number 123, got %v", result.Items[0].IssueNumber)
+	}
+	if result.Items[1].Text != "Locally edited title" {
+		t.Errorf("expected 'Locally edited title', got '%s'", result.Items[1].Text)
+	}
+	if result.Items[2].Text != "Same title" {
+		t.Errorf("expected 'Same title', got '%s'", result.Items[2].Text)
+	}
+	if len(result.LocallyEditedIssues) != 1 {
+		t.Fatalf("expected 1 locally edited issue, got %d", len(result.LocallyEditedIssues))
+	}
+	if result.LocallyEditedIssues[0] != 456 {
+		t.Errorf("expected issue 456, got %d", result.LocallyEditedIssues[0])
+	}
+}
+
+func TestSynchronizeTitlesWithHistoryNoMismatchesNeverFetches(t *testing.T) {
+	issueNum123 := uint64(123)
+	todoItems := []todo.TodoItem{
+		{Text: "Same title", IsChecked: false, IssueNumber: &issueNum123},
+	}
+	githubIssues := []GitHubIssue{
+		{Number: 123, Title: "Same title", State: IssueStateOpen},
+	}
+	eventsFetcher := func(issueNumber uint64) ([]json.RawMessage, error) {
+		return nil, fmt.Errorf("history should not be fetched")
+	}
+
+	result, err := SynchronizeTitlesWithHistory(todoItems, githubIssues, eventsFetcher)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(result.Items))
+	}
+	if result.Items[0].Text != "Same title" {
+		t.Errorf("expected 'Same title', got '%s'", result.Items[0].Text)
+	}
+	if len(result.LocallyEditedIssues) != 0 {
+		t.Errorf("expected no locally edited issues, got %v", result.LocallyEditedIssues)
+	}
+}
+
+func TestSynchronizeTitlesWithHistoryPropagatesFetcherError(t *testing.T) {
+	issueNum123 := uint64(123)
+	todoItems := []todo.TodoItem{
+		{Text: "Old title", IsChecked: false, IssueNumber: &issueNum123},
+	}
+	githubIssues := []GitHubIssue{
+		{Number: 123, Title: "New title", State: IssueStateOpen},
+	}
+	eventsFetcher := func(issueNumber uint64) ([]json.RawMessage, error) {
+		return nil, fmt.Errorf("Network error")
+	}
+
+	result, err := SynchronizeTitlesWithHistory(todoItems, githubIssues, eventsFetcher)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "Network error" {
+		t.Errorf("expected 'Network error', got '%s'", err.Error())
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("expected empty items, got %v", result.Items)
+	}
+}
+
 func TestParseGitHubIssuesNumberTypeVariants(t *testing.T) {
 	issuesJSON := []json.RawMessage{
 		json.RawMessage(`{
