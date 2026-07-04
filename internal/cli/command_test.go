@@ -327,6 +327,14 @@ func TestParseCleanDryRunCommand(t *testing.T) {
 	}
 }
 
+func TestParseVersionCommand(t *testing.T) {
+	args := []string{"program", "--version"}
+	result := ParseArgs(args)
+	if _, ok := result.(Version); !ok {
+		t.Errorf("Expected Version, got %T", result)
+	}
+}
+
 func TestParseNonRemoteCommandWithFourOrMoreArgs(t *testing.T) {
 	args := []string{"program", "push", "arg1", "arg2"}
 	result := ParseArgs(args)
