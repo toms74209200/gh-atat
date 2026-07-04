@@ -57,6 +57,11 @@ type Clean struct {
 
 func (Clean) command() {}
 
+// Version command
+type Version struct{}
+
+func (Version) command() {}
+
 // Help command
 type Help struct{}
 
@@ -99,6 +104,8 @@ func ParseArgs(args []string) Command {
 			return RemoteList{}
 		case "help":
 			return Help{}
+		case "--version":
+			return Version{}
 		default:
 			return Unknown{Message: args[1]}
 		}
