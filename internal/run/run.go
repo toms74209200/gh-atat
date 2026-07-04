@@ -17,7 +17,7 @@ import (
 )
 
 // Run executes the given command
-func Run(args []string) error {
+func Run(args []string, version string) error {
 	command := cli.ParseArgs(args)
 
 	switch cmd := command.(type) {
@@ -37,6 +37,9 @@ func Run(args []string) error {
 		return fmt.Errorf("login command is not needed for gh extension. Authentication is handled by gh CLI")
 	case cli.Whoami:
 		return fmt.Errorf("whoami command is not needed for gh extension. Use 'gh auth status' instead")
+	case cli.Version:
+		printVersion(version)
+		return nil
 	case cli.Help:
 		printHelp()
 		return nil
@@ -540,6 +543,13 @@ func ghAPIPatch(endpoint, body string) ([]byte, error) {
 		return nil, fmt.Errorf("gh api PATCH failed: %w: %s", err, string(output))
 	}
 	return output, nil
+}
+
+func printVersion(version string) {
+	if version == "" {
+		version = "dev"
+	}
+	fmt.Printf("gh-atat version %s\n", version)
 }
 
 func printHelp() {
