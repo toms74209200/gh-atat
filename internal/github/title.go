@@ -6,9 +6,6 @@ import (
 	"github.com/toms74209200/gh-atat/internal/todo"
 )
 
-// EventsFetcher is a function type that fetches timeline events for a GitHub issue
-type EventsFetcher func(issueNumber uint64) ([]json.RawMessage, error)
-
 // FindTitleMismatches returns issue numbers where the todo text doesn't match
 // the GitHub issue title. Only open issues are considered.
 func FindTitleMismatches(todoItems []todo.TodoItem, githubIssues []GitHubIssue) []uint64 {
@@ -61,20 +58,6 @@ func ParsePastTitles(eventsJSON []json.RawMessage) []string {
 		pastTitles = append(pastTitles, from)
 	}
 	return pastTitles
-}
-
-// CollectPastTitles fetches past titles only for issues where the todo text
-// doesn't match the current GitHub issue title.
-func CollectPastTitles(todoItems []todo.TodoItem, githubIssues []GitHubIssue, eventsFetcher EventsFetcher) (map[uint64][]string, error) {
-	pastTitles := make(map[uint64][]string)
-	for _, issueNumber := range FindTitleMismatches(todoItems, githubIssues) {
-		events, err := eventsFetcher(issueNumber)
-		if err != nil {
-			return nil, err
-		}
-		pastTitles[issueNumber] = ParsePastTitles(events)
-	}
-	return pastTitles, nil
 }
 
 // MatchesPastTitle checks if a text matches any past title for a given issue number.

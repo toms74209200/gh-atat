@@ -1,9 +1,10 @@
 package github
 
 import (
-	"encoding/json"
-	"errors"
+	"crypto/rand"
 	"fmt"
+	mrand "math/rand/v2"
+	"strings"
 	"testing"
 
 	"github.com/toms74209200/gh-atat/internal/todo"
@@ -15,12 +16,12 @@ func uint64Ptr(v uint64) *uint64 {
 
 func TestCalculateGitHubOperations(t *testing.T) {
 	tests := []struct {
-		name             string
-		todoItems        []todo.TodoItem
-		githubIssues     []GitHubIssue
-		expectedOpCount  int
-		expectedOpType   any
-		validateOp       func(t *testing.T, op GitHubOperation)
+		name            string
+		todoItems       []todo.TodoItem
+		githubIssues    []GitHubIssue
+		expectedOpCount int
+		expectedOpType  any
+		validateOp      func(t *testing.T, op GitHubOperation)
 	}{
 		{
 			name: "unchecked_no_issue_creates_issue",
@@ -115,176 +116,6 @@ func TestCalculateGitHubOperations(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestCreateIssueOperationCallsCreator(t *testing.T) {
-	todoItem := todo.TodoItem{
-		Text:        "New task",
-		IsChecked:   false,
-		IssueNumber: nil,
-	}
-	githubOperations := []TodoOperation{
-		{
-			Todo: todoItem,
-			Operation: CreateIssueOp{
-				Title: "New task",
-			},
-		},
-	}
-
-	mockCreator := func(title string) (uint64, error) {
-		if title != "New task" {
-			t.Errorf("expected title 'New task', got '%s'", title)
-		}
-		return 789, nil
-	}
-	mockCloser := func(number uint64) error {
-		return nil
-	}
-
-	updates, err := CalculateTodoUpdates(githubOperations, mockCreator, mockCloser)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(updates) != 1 {
-		t.Fatalf("expected 1 update, got %d", len(updates))
-	}
-
-	if updates[0].Todo.Text != "New task" {
-		t.Errorf("expected todo text 'New task', got '%s'", updates[0].Todo.Text)
-	}
-
-	if updates[0].IssueNumber == nil {
-		t.Fatal("expected issue number to be set")
-	}
-
-	if *updates[0].IssueNumber != 789 {
-		t.Errorf("expected issue number 789, got %d", *updates[0].IssueNumber)
-	}
-}
-
-func TestCloseIssueOperationCallsCloser(t *testing.T) {
-	issueNum := uint64(123)
-	todoItem := todo.TodoItem{
-		Text:        "Completed task",
-		IsChecked:   true,
-		IssueNumber: &issueNum,
-	}
-	githubOperations := []TodoOperation{
-		{
-			Todo: todoItem,
-			Operation: CloseIssueOp{
-				Number: 123,
-			},
-		},
-	}
-
-	mockCreator := func(title string) (uint64, error) {
-		return 0, errors.New("should not be called")
-	}
-	mockCloser := func(number uint64) error {
-		if number != 123 {
-			t.Errorf("expected issue number 123, got %d", number)
-		}
-		return nil
-	}
-
-	updates, err := CalculateTodoUpdates(githubOperations, mockCreator, mockCloser)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(updates) != 1 {
-		t.Fatalf("expected 1 update, got %d", len(updates))
-	}
-
-	if updates[0].Todo.Text != "Completed task" {
-		t.Errorf("expected todo text 'Completed task', got '%s'", updates[0].Todo.Text)
-	}
-
-	if updates[0].IssueNumber != nil {
-		t.Errorf("expected issue number to be nil, got %v", *updates[0].IssueNumber)
-	}
-}
-
-func TestCreateIssueOperationPropagatesError(t *testing.T) {
-	todoItem := todo.TodoItem{
-		Text:        "New task",
-		IsChecked:   false,
-		IssueNumber: nil,
-	}
-	githubOperations := []TodoOperation{
-		{
-			Todo: todoItem,
-			Operation: CreateIssueOp{
-				Title: "New task",
-			},
-		},
-	}
-
-	expectedErr := errors.New("failed to create issue")
-	mockCreator := func(title string) (uint64, error) {
-		return 0, expectedErr
-	}
-	mockCloser := func(number uint64) error {
-		t.Error("closer should not be called")
-		return nil
-	}
-
-	updates, err := CalculateTodoUpdates(githubOperations, mockCreator, mockCloser)
-
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-
-	if err != expectedErr {
-		t.Errorf("expected error '%v', got '%v'", expectedErr, err)
-	}
-
-	if updates != nil {
-		t.Errorf("expected nil updates on error, got %v", updates)
-	}
-}
-
-func TestCloseIssueOperationPropagatesError(t *testing.T) {
-	issueNum := uint64(123)
-	todoItem := todo.TodoItem{
-		Text:        "Completed task",
-		IsChecked:   true,
-		IssueNumber: &issueNum,
-	}
-	githubOperations := []TodoOperation{
-		{
-			Todo: todoItem,
-			Operation: CloseIssueOp{
-				Number: 123,
-			},
-		},
-	}
-
-	expectedErr := errors.New("failed to close issue")
-	mockCreator := func(title string) (uint64, error) {
-		t.Error("creator should not be called")
-		return 0, nil
-	}
-	mockCloser := func(number uint64) error {
-		return expectedErr
-	}
-
-	updates, err := CalculateTodoUpdates(githubOperations, mockCreator, mockCloser)
-
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-
-	if err != expectedErr {
-		t.Errorf("expected error '%v', got '%v'", expectedErr, err)
-	}
-
-	if updates != nil {
-		t.Errorf("expected nil updates on error, got %v", updates)
 	}
 }
 
@@ -390,92 +221,6 @@ func TestCalculateTitleUpdatesTrimsTitleForRename(t *testing.T) {
 	}
 }
 
-func TestCalculateTitleUpdatesWithHistoryResolvesByRenameHistory(t *testing.T) {
-	issueNum123 := uint64(123)
-	issueNum456 := uint64(456)
-	todoItems := []todo.TodoItem{
-		{Text: "Locally edited title", IsChecked: false, IssueNumber: &issueNum123},
-		{Text: "Old title", IsChecked: false, IssueNumber: &issueNum456},
-	}
-	githubIssues := []GitHubIssue{
-		{Number: 123, Title: "Original title", State: IssueStateOpen},
-		{Number: 456, Title: "New title", State: IssueStateOpen},
-	}
-	eventsFetcher := func(issueNumber uint64) ([]json.RawMessage, error) {
-		switch issueNumber {
-		case 123:
-			return []json.RawMessage{}, nil
-		case 456:
-			return []json.RawMessage{
-				json.RawMessage(`{"event": "renamed", "rename": {"from": "Old title", "to": "New title"}}`),
-			}, nil
-		default:
-			return nil, fmt.Errorf("history should not be fetched for issue #%d", issueNumber)
-		}
-	}
-
-	result, err := CalculateTitleUpdatesWithHistory(todoItems, githubIssues, eventsFetcher)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result.Operations) != 1 {
-		t.Fatalf("expected 1 operation, got %d", len(result.Operations))
-	}
-	renameOp := result.Operations[0].Operation.(RenameIssueOp)
-	if renameOp.Number != 123 {
-		t.Errorf("expected issue 123, got %d", renameOp.Number)
-	}
-	if renameOp.Title != "Locally edited title" {
-		t.Errorf("expected 'Locally edited title', got '%s'", renameOp.Title)
-	}
-	if len(result.StaleIssues) != 1 {
-		t.Fatalf("expected 1 stale issue, got %d", len(result.StaleIssues))
-	}
-	if result.StaleIssues[0] != 456 {
-		t.Errorf("expected stale issue 456, got %d", result.StaleIssues[0])
-	}
-}
-
-func TestRenameIssueOperationUpdatesNothingInTodo(t *testing.T) {
-	issueNum123 := uint64(123)
-	todoItem := todo.TodoItem{
-		Text:        "Edited title",
-		IsChecked:   false,
-		IssueNumber: &issueNum123,
-	}
-	githubOperations := []TodoOperation{
-		{
-			Todo: todoItem,
-			Operation: RenameIssueOp{
-				Number: 123,
-				Title:  "Edited title",
-			},
-		},
-	}
-
-	mockCreator := func(title string) (uint64, error) {
-		t.Fatal("creator should not be called")
-		return 0, nil
-	}
-	mockCloser := func(number uint64) error {
-		t.Fatal("closer should not be called")
-		return nil
-	}
-
-	updates, err := CalculateTodoUpdates(githubOperations, mockCreator, mockCloser)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(updates) != 1 {
-		t.Fatalf("expected 1 update, got %d", len(updates))
-	}
-	if updates[0].IssueNumber != nil {
-		t.Errorf("expected nil issue number, got %v", updates[0].IssueNumber)
-	}
-}
-
 func TestCalculateTitleUpdatesSkipsItemWithNonexistentIssue(t *testing.T) {
 	issueNum999 := uint64(999)
 	todoItems := []todo.TodoItem{
@@ -496,27 +241,36 @@ func TestCalculateTitleUpdatesSkipsItemWithNonexistentIssue(t *testing.T) {
 	}
 }
 
-func TestCalculateTitleUpdatesWithHistoryPropagatesFetcherError(t *testing.T) {
-	issueNum123 := uint64(123)
-	todoItems := []todo.TodoItem{
-		{Text: "Old title", IsChecked: false, IssueNumber: &issueNum123},
+func TestWhenParseCreatedIssueNumberWithNumberThenReturnsIssueNumber(t *testing.T) {
+	number := mrand.Uint64N(100000) + 1
+
+	got, err := ParseCreatedIssueNumber(fmt.Appendf(nil, `{"number":%d,"title":"%s"}`, number, rand.Text()))
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
 	}
-	githubIssues := []GitHubIssue{
-		{Number: 123, Title: "New title", State: IssueStateOpen},
+	if got != number {
+		t.Errorf("expected issue number %d, got %d", number, got)
 	}
-	eventsFetcher := func(issueNumber uint64) ([]json.RawMessage, error) {
-		return nil, fmt.Errorf("Network error")
+}
+
+func TestWhenParseCreatedIssueNumberWithBodyWithoutNumberThenReturnsError(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    []byte
+		wantErr string
+	}{
+		{"object without number then returns error", []byte(`{"title":"` + rand.Text() + `"}`), "created issue has no number"},
+		{"non-JSON body then returns error", []byte(rand.Text()), "invalid character"},
 	}
 
-	result, err := CalculateTitleUpdatesWithHistory(todoItems, githubIssues, eventsFetcher)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseCreatedIssueNumber(tt.body)
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if err.Error() != "Network error" {
-		t.Errorf("expected 'Network error', got '%s'", err.Error())
-	}
-	if len(result.Operations) != 0 {
-		t.Errorf("expected empty operations, got %v", result.Operations)
+			if err == nil || !strings.HasPrefix(err.Error(), tt.wantErr) {
+				t.Errorf("expected error starting with %q, got %v", tt.wantErr, err)
+			}
+		})
 	}
 }

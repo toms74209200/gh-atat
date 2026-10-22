@@ -1,95 +1,8 @@
 package github
 
 import (
-	"encoding/json"
-	"fmt"
-
 	"github.com/toms74209200/gh-atat/internal/todo"
 )
-
-// IssueFetcher is a function type that fetches issues from GitHub API
-// Parameters: repo, token, page, perPage
-// Returns: JSON values and error
-type IssueFetcher func(repo string, token string, page int, perPage int) ([]json.RawMessage, error)
-
-// ParseGitHubIssues parses JSON data and returns a list of GitHubIssue
-func ParseGitHubIssues(issuesJSON []json.RawMessage) []GitHubIssue {
-	var issues []GitHubIssue
-
-	for _, issueJSON := range issuesJSON {
-		var raw map[string]interface{}
-		if err := json.Unmarshal(issueJSON, &raw); err != nil {
-			continue
-		}
-
-		// Extract fields
-		number, numberOk := raw["number"].(float64)
-		title, titleOk := raw["title"].(string)
-		stateStr, stateOk := raw["state"].(string)
-
-		// Validate that number is an integer (not a float with decimal part)
-		if !numberOk || number != float64(uint64(number)) {
-			continue
-		}
-
-		if !titleOk || !stateOk {
-			continue
-		}
-
-		// Filter out pull requests
-		if pullRequest, exists := raw["pull_request"]; exists && pullRequest != nil {
-			continue
-		}
-
-		// Parse state
-		var state IssueState
-		switch stateStr {
-		case "open":
-			state = IssueStateOpen
-		case "closed":
-			state = IssueStateClosed
-		default:
-			continue
-		}
-
-		issues = append(issues, GitHubIssue{
-			Number: uint64(number),
-			Title:  title,
-			State:  state,
-		})
-	}
-
-	return issues
-}
-
-// FetchGitHubIssues fetches all issues from GitHub with pagination
-func FetchGitHubIssues(repo string, token string, fetcher IssueFetcher) ([]GitHubIssue, error) {
-	const maxPages = 1000
-	var allIssues []GitHubIssue
-	page := 1
-	perPage := 100
-
-	for {
-		issuesJSON, err := fetcher(repo, token, page, perPage)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch issues: %w", err)
-		}
-
-		if len(issuesJSON) == 0 {
-			break
-		}
-
-		parsedIssues := ParseGitHubIssues(issuesJSON)
-		allIssues = append(allIssues, parsedIssues...)
-		page++
-
-		if page > maxPages {
-			return nil, fmt.Errorf("exceeded maximum page limit")
-		}
-	}
-
-	return allIssues, nil
-}
 
 // SynchronizeWithGitHubIssues synchronizes TodoItems with GitHub issues
 func SynchronizeWithGitHubIssues(todoItems []todo.TodoItem, githubIssues []GitHubIssue) []todo.TodoItem {
@@ -156,7 +69,7 @@ func SynchronizeWithGitHubIssues(todoItems []todo.TodoItem, githubIssues []GitHu
 // Items contains the updated todo items, and LocallyEditedIssues contains
 // issue numbers where the local text was changed (not matching any past title).
 type TitleSynchronization struct {
-	Items                []todo.TodoItem
+	Items               []todo.TodoItem
 	LocallyEditedIssues []uint64
 }
 
@@ -202,20 +115,9 @@ func SynchronizeTitles(todoItems []todo.TodoItem, githubIssues []GitHubIssue, pa
 	}
 
 	return TitleSynchronization{
-		Items:                updatedItems,
+		Items:               updatedItems,
 		LocallyEditedIssues: localEdits,
 	}
-}
-
-// SynchronizeTitlesWithHistory fetches rename history for mismatched issues
-// and resolves title conflicts.
-func SynchronizeTitlesWithHistory(todoItems []todo.TodoItem, githubIssues []GitHubIssue, eventsFetcher EventsFetcher) (TitleSynchronization, error) {
-	pastTitles, err := CollectPastTitles(todoItems, githubIssues, eventsFetcher)
-	if err != nil {
-		return TitleSynchronization{}, err
-	}
-
-	return SynchronizeTitles(todoItems, githubIssues, pastTitles), nil
 }
 
 // trimString removes leading and trailing whitespace

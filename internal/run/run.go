@@ -2,14 +2,14 @@ package run
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 
 	"github.com/toms74209200/gh-atat/internal/clean"
 	"github.com/toms74209200/gh-atat/internal/cli"
 	"github.com/toms74209200/gh-atat/internal/config"
+	"github.com/toms74209200/gh-atat/internal/ghapi"
 	"github.com/toms74209200/gh-atat/internal/github"
 	"github.com/toms74209200/gh-atat/internal/markdown"
 	"github.com/toms74209200/gh-atat/internal/storage"
@@ -83,18 +83,17 @@ func runPush() error {
 	}
 
 	// Fetch GitHub issues
-	githubIssues, err := fetchGitHubIssues(repo)
+	githubIssues, err := listIssues(repo)
 	if err != nil {
 		return err
 	}
 
 	// Calculate title updates with rename history
-	titleUpdates, err := github.CalculateTitleUpdatesWithHistory(todoItems, githubIssues, func(issueNumber uint64) ([]json.RawMessage, error) {
-		return fetchIssueEvents(repo, issueNumber)
-	})
+	pastTitles, err := collectPastTitles(repo, todoItems, githubIssues)
 	if err != nil {
 		return err
 	}
+	titleUpdates := github.CalculateTitleUpdates(todoItems, githubIssues, pastTitles)
 
 	for _, issueNumber := range titleUpdates.StaleIssues {
 		fmt.Printf("Warning: issue #%d was renamed on GitHub; run `gh atat pull` to update TODO.md\n", issueNumber)
@@ -113,31 +112,32 @@ func runPush() error {
 	for _, todoOp := range allOperations {
 		switch op := todoOp.Operation.(type) {
 		case github.CreateIssueOp:
-			issueNumber, err := createGitHubIssue(repo, op.Title)
+			body, err := ghapi.Execute(ghapi.CreateIssue{Repo: repo, Title: op.Title})
+			if err != nil {
+				return err
+			}
+			issueNumber, err := github.ParseCreatedIssueNumber(body)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("Created issue #%d: %s\n", issueNumber, todoOp.Todo.Text)
 
 			// Update TODO item with issue number
-			issueNum := uint64(issueNumber)
 			for j := range updatedTodoItems {
 				if updatedTodoItems[j].Text == todoOp.Todo.Text &&
 					updatedTodoItems[j].IsChecked == todoOp.Todo.IsChecked &&
 					updatedTodoItems[j].IssueNumber == todoOp.Todo.IssueNumber {
-					updatedTodoItems[j].IssueNumber = &issueNum
+					updatedTodoItems[j].IssueNumber = &issueNumber
 					break
 				}
 			}
 		case github.CloseIssueOp:
-			err := closeGitHubIssue(repo, int(op.Number))
-			if err != nil {
+			if _, err := ghapi.Execute(ghapi.CloseIssue{Repo: repo, Number: op.Number}); err != nil {
 				return err
 			}
 			fmt.Printf("Closed issue #%d\n", op.Number)
 		case github.RenameIssueOp:
-			err := renameGitHubIssue(repo, int(op.Number), op.Title)
-			if err != nil {
+			if _, err := ghapi.Execute(ghapi.RenameIssue{Repo: repo, Number: op.Number, Title: op.Title}); err != nil {
 				return err
 			}
 			fmt.Printf("Renamed issue #%d: %s\n", op.Number, op.Title)
@@ -186,18 +186,17 @@ func runPull() error {
 	}
 
 	// Fetch GitHub issues
-	githubIssues, err := fetchGitHubIssues(repo)
+	githubIssues, err := listIssues(repo)
 	if err != nil {
 		return err
 	}
 
 	// Synchronize titles with rename history
-	titleSync, err := github.SynchronizeTitlesWithHistory(todoItems, githubIssues, func(issueNumber uint64) ([]json.RawMessage, error) {
-		return fetchIssueEvents(repo, issueNumber)
-	})
+	pastTitles, err := collectPastTitles(repo, todoItems, githubIssues)
 	if err != nil {
 		return err
 	}
+	titleSync := github.SynchronizeTitles(todoItems, githubIssues, pastTitles)
 
 	for _, issueNumber := range titleSync.LocallyEditedIssues {
 		fmt.Printf("Warning: TODO.md text for issue #%d was changed locally; run `gh atat push` to update the issue title\n", issueNumber)
@@ -256,7 +255,7 @@ func runClean(dryRun bool) error {
 	}
 
 	// Fetch GitHub issues
-	githubIssues, err := fetchGitHubIssues(repo)
+	githubIssues, err := listIssues(repo)
 	if err != nil {
 		return err
 	}
@@ -349,12 +348,11 @@ func runRemoteAdd(repo string) error {
 	}
 
 	// Check if repository exists on GitHub
-	exists, err := checkRepoExists(repo)
-	if err != nil {
+	if _, err := ghapi.Execute(ghapi.GetRepository{Repo: repo}); err != nil {
+		if errors.Is(err, ghapi.ErrNotFound) {
+			return fmt.Errorf("repository %s not found or not accessible", repo)
+		}
 		return fmt.Errorf("failed to check repository %s: %w", repo, err)
-	}
-	if !exists {
-		return fmt.Errorf("repository %s not found or not accessible", repo)
 	}
 
 	// Add repository
@@ -430,119 +428,48 @@ func getFirstRepository(configMap map[config.ConfigKey]any) (string, error) {
 	return repo, nil
 }
 
-func fetchGitHubIssues(repo string) ([]github.GitHubIssue, error) {
-	fetchFunc := func(repo string, token string, page int, perPage int) ([]json.RawMessage, error) {
-		endpoint := fmt.Sprintf("repos/%s/issues?state=all&per_page=%d&page=%d", repo, perPage, page)
-		data, err := ghAPI(endpoint)
+func listIssues(repo string) ([]github.GitHubIssue, error) {
+	const maxPages = 1000
+	var issues []github.GitHubIssue
+	for page := 1; ; page++ {
+		body, err := ghapi.Execute(ghapi.ListIssues{Repo: repo, Page: page, PerPage: 100})
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch issues: %w", err)
+		}
+		var issuesJSON []json.RawMessage
+		if err := json.Unmarshal(body, &issuesJSON); err != nil {
+			return nil, fmt.Errorf("failed to parse issues: %w", err)
+		}
+		if len(issuesJSON) == 0 {
+			return issues, nil
+		}
+		if page >= maxPages {
+			return nil, fmt.Errorf("exceeded maximum page limit")
+		}
+		for _, issueJSON := range issuesJSON {
+			issue, err := github.ParseGitHubIssue(issueJSON)
+			if err != nil {
+				continue
+			}
+			issues = append(issues, issue)
+		}
+	}
+}
+
+func collectPastTitles(repo string, todoItems []todo.TodoItem, githubIssues []github.GitHubIssue) (map[uint64][]string, error) {
+	pastTitles := make(map[uint64][]string)
+	for _, issueNumber := range github.FindTitleMismatches(todoItems, githubIssues) {
+		body, err := ghapi.Execute(ghapi.ListIssueEvents{Repo: repo, Number: issueNumber})
 		if err != nil {
 			return nil, err
 		}
-
-		var issues []json.RawMessage
-		if err := json.Unmarshal(data, &issues); err != nil {
+		var events []json.RawMessage
+		if err := json.Unmarshal(body, &events); err != nil {
 			return nil, err
 		}
-		return issues, nil
+		pastTitles[issueNumber] = github.ParsePastTitles(events)
 	}
-
-	return github.FetchGitHubIssues(repo, "", fetchFunc)
-}
-
-func createGitHubIssue(repo, title string) (int, error) {
-	body := map[string]string{"title": title}
-	bodyJSON, err := json.Marshal(body)
-	if err != nil {
-		return 0, err
-	}
-
-	output, err := ghAPIPost(fmt.Sprintf("repos/%s/issues", repo), string(bodyJSON))
-	if err != nil {
-		return 0, err
-	}
-
-	var issue github.GitHubIssue
-	if err := json.Unmarshal(output, &issue); err != nil {
-		return 0, err
-	}
-
-	return int(issue.Number), nil
-}
-
-func closeGitHubIssue(repo string, number int) error {
-	body := map[string]string{"state": "closed"}
-	bodyJSON, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-
-	_, err = ghAPIPatch(fmt.Sprintf("repos/%s/issues/%d", repo, number), string(bodyJSON))
-	return err
-}
-
-func fetchIssueEvents(repo string, issueNumber uint64) ([]json.RawMessage, error) {
-	endpoint := fmt.Sprintf("repos/%s/issues/%d/events", repo, issueNumber)
-	data, err := ghAPI(endpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	var events []json.RawMessage
-	if err := json.Unmarshal(data, &events); err != nil {
-		return nil, err
-	}
-	return events, nil
-}
-
-func renameGitHubIssue(repo string, number int, title string) error {
-	body := map[string]string{"title": title}
-	bodyJSON, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-
-	_, err = ghAPIPatch(fmt.Sprintf("repos/%s/issues/%d", repo, number), string(bodyJSON))
-	return err
-}
-
-func checkRepoExists(repo string) (bool, error) {
-	_, err := ghAPI(fmt.Sprintf("repos/%s", repo))
-	if err != nil {
-		// If error contains "404", repo doesn't exist
-		if strings.Contains(err.Error(), "404") {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-func ghAPI(endpoint string) ([]byte, error) {
-	cmd := exec.Command("gh", "api", endpoint)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("gh api failed: %w: %s", err, string(output))
-	}
-	return output, nil
-}
-
-func ghAPIPost(endpoint, body string) ([]byte, error) {
-	cmd := exec.Command("gh", "api", endpoint, "-X", "POST", "--input", "-")
-	cmd.Stdin = strings.NewReader(body)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("gh api POST failed: %w: %s", err, string(output))
-	}
-	return output, nil
-}
-
-func ghAPIPatch(endpoint, body string) ([]byte, error) {
-	cmd := exec.Command("gh", "api", endpoint, "-X", "PATCH", "--input", "-")
-	cmd.Stdin = strings.NewReader(body)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("gh api PATCH failed: %w: %s", err, string(output))
-	}
-	return output, nil
+	return pastTitles, nil
 }
 
 func printVersion(version string) {
