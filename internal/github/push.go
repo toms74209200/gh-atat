@@ -1,6 +1,9 @@
 package github
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/toms74209200/gh-atat/internal/todo"
 )
 
@@ -130,63 +133,15 @@ func CalculateTitleUpdates(todoItems []todo.TodoItem, githubIssues []GitHubIssue
 	}
 }
 
-// CalculateTitleUpdatesWithHistory fetches rename history for mismatched issues
-// and calculates title update operations.
-func CalculateTitleUpdatesWithHistory(todoItems []todo.TodoItem, githubIssues []GitHubIssue, eventsFetcher EventsFetcher) (TitleUpdates, error) {
-	pastTitles, err := CollectPastTitles(todoItems, githubIssues, eventsFetcher)
-	if err != nil {
-		return TitleUpdates{}, err
+func ParseCreatedIssueNumber(body []byte) (uint64, error) {
+	var issue struct {
+		Number *uint64 `json:"number"`
 	}
-
-	return CalculateTitleUpdates(todoItems, githubIssues, pastTitles), nil
-}
-
-// IssueCreator is a function that creates a GitHub issue and returns its number
-type IssueCreator func(title string) (uint64, error)
-
-// IssueCloser is a function that closes a GitHub issue
-type IssueCloser func(number uint64) error
-
-// TodoUpdate represents a todo item with its updated issue number (if any)
-type TodoUpdate struct {
-	Todo        todo.TodoItem
-	IssueNumber *uint64
-}
-
-// CalculateTodoUpdates executes GitHub operations and returns updated todo items
-func CalculateTodoUpdates(
-	githubOperations []TodoOperation,
-	issueCreator IssueCreator,
-	issueCloser IssueCloser,
-) ([]TodoUpdate, error) {
-	updates := make([]TodoUpdate, 0, len(githubOperations))
-
-	for _, operation := range githubOperations {
-		var issueNumber *uint64
-
-		switch op := operation.Operation.(type) {
-		case CreateIssueOp:
-			num, err := issueCreator(op.Title)
-			if err != nil {
-				return nil, err
-			}
-			issueNumber = &num
-
-		case CloseIssueOp:
-			if err := issueCloser(op.Number); err != nil {
-				return nil, err
-			}
-			issueNumber = nil
-
-		case RenameIssueOp:
-			issueNumber = nil
-		}
-
-		updates = append(updates, TodoUpdate{
-			Todo:        operation.Todo,
-			IssueNumber: issueNumber,
-		})
+	if err := json.Unmarshal(body, &issue); err != nil {
+		return 0, err
 	}
-
-	return updates, nil
+	if issue.Number == nil {
+		return 0, fmt.Errorf("created issue has no number")
+	}
+	return *issue.Number, nil
 }

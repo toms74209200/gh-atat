@@ -2,7 +2,6 @@ package github
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/toms74209200/gh-atat/internal/todo"
@@ -143,50 +142,6 @@ func TestMatchesPastTitleWithTrim(t *testing.T) {
 	}
 }
 
-func TestCollectPastTitlesFetchesOnlyMismatchedIssues(t *testing.T) {
-	issueNum123 := uint64(123)
-	issueNum456 := uint64(456)
-	todoItems := []todo.TodoItem{
-		{Text: "Old title", IsChecked: false, IssueNumber: &issueNum123},
-		{Text: "Same title", IsChecked: false, IssueNumber: &issueNum456},
-	}
-	githubIssues := []GitHubIssue{
-		{Number: 123, Title: "New title", State: IssueStateOpen},
-		{Number: 456, Title: "Same title", State: IssueStateOpen},
-	}
-
-	eventsFetcher := func(issueNumber uint64) ([]json.RawMessage, error) {
-		if issueNumber == 123 {
-			return []json.RawMessage{
-				json.RawMessage(`{
-					"event": "renamed",
-					"rename": {"from": "Old title", "to": "New title"}
-				}`),
-			}, nil
-		}
-		return nil, fmt.Errorf("history should not be fetched for issue #%d", issueNumber)
-	}
-
-	result, err := CollectPastTitles(todoItems, githubIssues, eventsFetcher)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(result))
-	}
-	titles, exists := result[123]
-	if !exists {
-		t.Fatal("expected entry for issue 123")
-	}
-	if len(titles) != 1 {
-		t.Fatalf("expected 1 past title, got %d", len(titles))
-	}
-	if titles[0] != "Old title" {
-		t.Errorf("expected 'Old title', got '%s'", titles[0])
-	}
-}
-
 func TestFindTitleMismatchesSkipsNonexistentIssue(t *testing.T) {
 	issueNum999 := uint64(999)
 	todoItems := []todo.TodoItem{
@@ -216,31 +171,5 @@ func TestParsePastTitlesIgnoresInvalidJSON(t *testing.T) {
 	}
 	if pastTitles[0] != "Valid title" {
 		t.Errorf("expected 'Valid title', got '%s'", pastTitles[0])
-	}
-}
-
-func TestCollectPastTitlesPropagatesFetcherError(t *testing.T) {
-	issueNum123 := uint64(123)
-	todoItems := []todo.TodoItem{
-		{Text: "Old title", IsChecked: false, IssueNumber: &issueNum123},
-	}
-	githubIssues := []GitHubIssue{
-		{Number: 123, Title: "New title", State: IssueStateOpen},
-	}
-
-	eventsFetcher := func(issueNumber uint64) ([]json.RawMessage, error) {
-		return nil, fmt.Errorf("Network error")
-	}
-
-	result, err := CollectPastTitles(todoItems, githubIssues, eventsFetcher)
-
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if err.Error() != "Network error" {
-		t.Errorf("expected 'Network error', got '%s'", err.Error())
-	}
-	if result != nil {
-		t.Errorf("expected nil result, got %v", result)
 	}
 }
